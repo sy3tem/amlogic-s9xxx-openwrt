@@ -172,7 +172,7 @@ custom_config() {
 
     config_list=""
     if [[ -s "${custom_config_file}" ]]; then
-        config_list="$(sed -n 's/^CONFIG_PACKAGE_\(.*\)=y$/\1/p' "${custom_config_file}" | tr '\n' ' ')"
+    config_list="$(tr -d '\r' < "${custom_config_file}" | sed '1s/^\xEF\xBB\xBF//' | sed -n 's/^CONFIG_PACKAGE_\(.*\)=y$/\1/p' | tr '\n' ' ')"
         echo -e "${INFO} Custom package list: \n$(echo "${config_list}" | tr ' ' '\n')"
     else
         echo -e "${INFO} No custom configuration file found, skipped."
