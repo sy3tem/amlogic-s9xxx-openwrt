@@ -22,6 +22,7 @@ on:
           - openwrt:24.10.8
           - immortalwrt:25.12.2
           - immortalwrt:24.10.6
+          - immortalwrt:SNAPSHOT
       openwrt_board:
         description: "Select device board"
         required: false

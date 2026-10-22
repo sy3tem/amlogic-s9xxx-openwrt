@@ -1,0 +1,137 @@
+#!/bin/sh
+#
+# 99-n1-opt: use the free space after the rootfs partition as /opt.
+#
+# ophub's N1 image only ships p1 (boot, FAT32) and p2 (rootfs). On an 8 GB
+# eMMC that leaves ~6 GB unallocated, which is why /opt used to be missing.
+# This script appends p3, formats it ext4 (label "opt") and adds a fstab entry.
+#
+# Safety rules:
+#   * only runs when the running rootfs is on an mmcblk* device (eMMC/SD),
+#     never on a USB boot;
+#   * only touches MBR entry 3; the boot code and the disk signature are
+#     restored byte-for-byte from a backup, so the bootloader is unaffected;
+#   * no reboot is issued. If the kernel will not pick up the new partition
+#     the next boot simply tries again.
+
+LOG_TAG="n1-opt"
+log() { logger -t "${LOG_TAG}" "$*"; }
+
+mkdir -p /opt
+grep -q " /opt " /proc/mounts && exit 0
+
+# ---- locate the partition we booted from --------------------------------------
+# root= is either /dev/mmcblkXpY (ext4 rootfs) or PARTUUID=... (squashfs + /rom).
+detect_root_part() {
+	local tok p mp d
+	for tok in $(cat /proc/cmdline 2>/dev/null); do
+		case "${tok}" in
+			root=/dev/mmcblk*) echo "${tok#root=}"; return 0 ;;
+			root=PARTUUID=*)
+				p="/dev/disk/by-partuuid/${tok#root=PARTUUID=}"
+				[ -e "${p}" ] && { readlink -f "${p}"; return 0; }
+				;;
+			root=/dev/sd*|root=/dev/nvme*) echo "${tok#root=}"; return 0 ;;
+		esac
+	done
+	for mp in /rom /; do
+		d=$(awk -v m="${mp}" '$2 == m { print $1; exit }' /proc/mounts 2>/dev/null)
+		case "${d}" in /dev/*) echo "${d}"; return 0 ;; esac
+	done
+	for d in /dev/mmcblk0p2 /dev/mmcblk1p2 /dev/mmcblk2p2; do
+		[ -b "${d}" ] && { echo "${d}"; return 0; }
+	done
+	return 1
+}
+
+ROMPART=$(detect_root_part)
+[ -n "${ROMPART}" ] || { log "cannot locate the boot partition, skip"; exit 0; }
+ROMPART=$(readlink -f "${ROMPART}" 2>/dev/null)
+
+case "${ROMPART}" in
+	/dev/mmcblk*p*) ;;
+	*) log "${ROMPART} is not eMMC/SD, skip"; exit 0 ;;
+esac
+
+DISK="${ROMPART%p*}"
+NUM="${ROMPART##*p}"
+DISKNAME="${DISK##*/}"
+PART="${DISK}3"
+
+set_fstab() {
+	uci -q delete fstab.opt
+	uci -q set fstab.opt=mount
+	uci -q set fstab.opt.target='/opt'
+	uci -q set fstab.opt.label='opt'
+	uci -q set fstab.opt.enabled='1'
+	uci commit fstab
+}
+
+# ---- 1) p3 already exists -----------------------------------------------------
+if [ -b "${PART}" ]; then
+	FS=$(blkid -o value -s TYPE "${PART}" 2>/dev/null)
+	if [ -z "${FS}" ]; then
+		log "p3 exists without filesystem, formatting it"
+		command -v mkfs.ext4 >/dev/null 2>&1 || { log "mkfs.ext4 missing"; exit 0; }
+		mkfs.ext4 -F -L opt "${PART}" >/dev/null 2>&1 || { log "mkfs failed"; exit 0; }
+		FS=ext4
+	fi
+	mount -L opt /opt 2>/dev/null || mount "${PART}" /opt 2>/dev/null
+	set_fstab
+	log "/opt ready on ${PART} (${FS})"
+	exit 0
+fi
+
+# ---- 2) append p3 in the free space ------------------------------------------
+command -v sfdisk >/dev/null 2>&1 || { log "sfdisk missing, skip"; exit 0; }
+command -v mkfs.ext4 >/dev/null 2>&1 || { log "mkfs.ext4 missing, skip"; exit 0; }
+
+PARTDIR="/sys/class/block/${DISKNAME}p${NUM}"
+[ -r "${PARTDIR}/start" ] || { log "no sysfs geometry for ${DISKNAME}p${NUM}"; exit 0; }
+
+START_P=$(cat "${PARTDIR}/start")
+SIZE_P=$(cat "${PARTDIR}/size")
+DISKSZ=$(cat "/sys/class/block/${DISKNAME}/size" 2>/dev/null)
+[ -n "${DISKSZ}" ] || { log "no disk size for ${DISKNAME}"; exit 0; }
+
+ALIGN=2048
+START=$(( (START_P + SIZE_P + ALIGN - 1) / ALIGN * ALIGN ))
+FREE=$(( DISKSZ - START - ALIGN ))
+if [ "${FREE}" -lt 2097152 ]; then
+	log "only $((FREE / 2048)) MiB free after p2, need >= 1 GiB"
+	exit 0
+fi
+
+dd if="${DISK}" of=/tmp/n1-mbr.bak bs=512 count=1 2>/dev/null
+echo "start=${START}, size=${FREE}, type=83" | \
+	sfdisk --append --force --no-reread "${DISK}" >/dev/null 2>&1
+RC=$?
+sync
+
+if [ "${RC}" -ne 0 ] || [ ! -s /tmp/n1-mbr.bak ]; then
+	log "sfdisk --append failed (rc=${RC})"
+	[ -s /tmp/n1-mbr.bak ] && dd if=/tmp/n1-mbr.bak of="${DISK}" bs=512 count=1 conv=notrunc 2>/dev/null
+	exit 0
+fi
+
+# sfdisk rewrote sector 0; put the original back and only keep the new p3 entry
+# (p3 starts at byte 446 + 2*16 = 478).
+dd if="${DISK}" of=/tmp/n1-mbr.new bs=512 count=1 2>/dev/null
+dd if=/tmp/n1-mbr.bak of="${DISK}" bs=512 count=1 conv=notrunc 2>/dev/null
+dd if=/tmp/n1-mbr.new of="${DISK}" bs=1 skip=478 seek=478 count=16 conv=notrunc 2>/dev/null
+sync
+
+partx -a -n 3 "${DISK}" >/dev/null 2>&1 || partx -u -n 3 "${DISK}" >/dev/null 2>&1
+sleep 1
+
+if [ ! -b "${PART}" ]; then
+	log "kernel did not pick up ${PART}, will retry next boot"
+	exit 0
+fi
+
+mkfs.ext4 -F -L opt "${PART}" >/dev/null 2>&1 || { log "mkfs failed"; exit 0; }
+mount -L opt /opt 2>/dev/null || mount "${PART}" /opt 2>/dev/null
+set_fstab
+
+log "/opt created on ${PART} ($((FREE * 512 / 1048576)) MiB)"
+exit 0

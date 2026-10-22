@@ -73,7 +73,11 @@ download_imagebuilder() {
     else
         download_url="downloads.openwrt.org"
     fi
-    download_file="https://${download_url}/releases/${op_branch}/targets/armsr/armv8/${op_sourse}-imagebuilder-${op_branch}-armsr-armv8.Linux-x86_64.tar.zst"
+    if [[ "${op_branch}" == "SNAPSHOT" ]]; then
+        download_file="https://${download_url}/snapshots/targets/armsr/armv8/${op_sourse}-imagebuilder-armsr-armv8.Linux-x86_64.tar.zst"
+    else
+        download_file="https://${download_url}/releases/${op_branch}/targets/armsr/armv8/${op_sourse}-imagebuilder-${op_branch}-armsr-armv8.Linux-x86_64.tar.zst"
+    fi
     curl -fsSOL ${download_file}
     [[ "${?}" -eq "0" ]] || error_msg "Failed to download: [ ${download_file} ]"
 
@@ -194,6 +198,42 @@ custom_files() {
     fi
 }
 
+
+# Bundle the mihomo (Clash.Meta) core into the image so OpenClash does not
+# start with "core not downloaded".
+custom_openclash_core() {
+    cd ${imagebuilder_path}
+    echo -e "${STEPS} Bundling OpenClash mihomo core..."
+
+    local arch tag url core_dir core_file
+    case "$(uname -m)" in
+        x86_64)  arch="amd64" ;;
+        aarch64) arch="arm64" ;;
+        armv7l)  arch="armv7" ;;
+        *)       arch="arm64" ;;
+    esac
+
+    core_dir="files/etc/openclash/core"
+    core_file="${core_dir}/clash_meta"
+    mkdir -p "${core_dir}"
+
+    # Resolve the latest tag without the API (avoids unauthenticated rate limits)
+    tag="$(curl -fsSLI -o /dev/null -w '%{url_effective}' --max-time 60 \
+        https://github.com/MetaCubeX/mihomo/releases/latest | sed 's|.*/tag/||')"
+    [[ -n "${tag}" ]] || { echo -e "${WARNING} Cannot resolve mihomo tag, skipped."; return 0; }
+
+    url="https://github.com/MetaCubeX/mihomo/releases/download/${tag}/mihomo-linux-${arch}-${tag}.gz"
+    echo -e "${INFO} Downloading ${url}"
+    if ! curl -fsSL --retry 3 --max-time 600 -o /tmp/mihomo.gz "${url}"; then
+        echo -e "${WARNING} Failed to download mihomo core, skipped."
+        return 0
+    fi
+
+    gunzip -c /tmp/mihomo.gz > "${core_file}" || { echo -e "${WARNING} gunzip failed, skipped."; return 0; }
+    chmod 0755 "${core_file}"
+    echo -e "${INFO} core size: $(du -h "${core_file}" | cut -f1)"
+}
+
 # Rebuild OpenWrt firmware
 rebuild_firmware() {
     cd ${imagebuilder_path}
@@ -309,6 +349,7 @@ adjust_settings
 custom_packages
 custom_config
 custom_files
+custom_openclash_core
 rebuild_firmware
 custom_settings
 #

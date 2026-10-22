@@ -1,0 +1,58 @@
+#!/bin/sh
+#
+# N1 single-NIC side-router defaults (runs once on first boot).
+#   LAN        : 192.168.100.254/24
+#   gateway/DNS: 192.168.100.1 (main router)
+#   DHCP server: off (DNS only)
+#   firewall   : masquerade on the lan zone
+
+# find the zone whose name is 'lan' (do not rely on the zone index)
+lan_zone="$(uci -q show firewall | sed -n "s/^firewall\.\([^.]*\)\.name='lan'$/\1/p" | head -n 1)"
+[ -n "${lan_zone}" ] || lan_zone="@zone[0]"
+
+# --- network ---
+uci -q set network.lan.proto='static'
+uci -q set network.lan.ipaddr='192.168.100.254'
+uci -q set network.lan.netmask='255.255.255.0'
+uci -q set network.lan.gateway='192.168.100.1'
+uci -q set network.lan.dns='192.168.100.1'
+uci -q delete network.lan.ip6assign
+uci -q delete network.lan.ip6addr
+
+# single NIC: drop any wan interface left over from the generic target
+uci -q delete network.wan
+uci -q delete network.wan6
+uci -q commit network
+
+# --- dhcp: DNS only, no address distribution ---
+uci -q set dhcp.lan.ignore='1'
+uci -q set dhcp.lan.dhcpv4='disabled'
+uci -q set dhcp.lan.dhcpv6='disabled'
+uci -q set dhcp.lan.ra='disabled'
+uci -q set dhcp.lan.ndp='disabled'
+uci -q delete dhcp.lan.start
+uci -q delete dhcp.lan.limit
+uci -q delete dhcp.lan.leasetime
+uci -q commit dhcp
+
+# --- firewall: a side-router must NAT on lan ---
+uci -q set firewall.${lan_zone}.masq='1'
+uci -q set firewall.${lan_zone}.mtu_fix='1'
+uci -q set firewall.${lan_zone}.input='ACCEPT'
+uci -q set firewall.${lan_zone}.output='ACCEPT'
+uci -q set firewall.${lan_zone}.forward='ACCEPT'
+uci -q commit firewall
+
+# --- system: keep the stock hostname (ImmortalWrt) ---
+uci -q set system.@system[0].timezone='CST-8'
+uci -q set system.@system[0].zonename='Asia/Shanghai'
+uci -q commit system
+
+# --- luci: Chinese UI + argon theme ---
+if [ -f /etc/config/luci ]; then
+	uci -q set luci.main.lang='zh_cn'
+	uci -q set luci.main.mediaurlbase='/luci-static/argon'
+	uci -q commit luci
+fi
+
+exit 0

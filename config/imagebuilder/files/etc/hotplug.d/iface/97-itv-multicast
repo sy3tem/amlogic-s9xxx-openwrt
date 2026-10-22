@@ -1,0 +1,46 @@
+#!/bin/sh
+#
+# ITV (IPTV) multicast support for the N1 side-router.
+#
+# Dormant by default: it only acts when a network interface named "itv"
+# exists (e.g. eth0.45 VLAN on the single NIC, or a second USB NIC).
+# When such an interface comes up it re-asserts:
+#   - the `itv` firewall zone (idempotent; masq=0, forward=DROP)
+#   - the multicast routes 224.0.0.0/4 and 239.0.0.0/8 via that device
+#   - force_igmp_version=2 on that device
+#
+# Without an itv interface nothing changes: on a plain LAN side-router the
+# multicast stream is joined by rtp2httpd itself and the lan zone input is
+# already ACCEPT.
+
+case "$ACTION" in
+	ifup|ifupdate|update) ;;
+	*) exit 0 ;;
+esac
+[ "$INTERFACE" = "itv" ] || exit 0
+
+# --- 1) zone first (a zone is a container, it does not need a live iface) ---
+if ! uci -q get firewall.itv >/dev/null; then
+	uci set firewall.itv='zone'
+	uci set firewall.itv.name='itv'
+	uci set firewall.itv.network='itv'
+	uci set firewall.itv.input='ACCEPT'
+	uci set firewall.itv.output='ACCEPT'
+	uci set firewall.itv.forward='DROP'
+	uci set firewall.itv.masq='0'
+	uci set firewall.itv.mtu_fix='0'
+	uci commit firewall
+	/etc/init.d/firewall reload >/dev/null 2>&1
+fi
+
+# --- 2) resolve the real device: runtime l3_device first, then uci device ---
+DEV=$(ubus call network.interface.itv status 2>/dev/null | jsonfilter -e '@.l3_device' 2>/dev/null)
+[ -z "$DEV" ] && DEV=$(uci -q get network.itv.device 2>/dev/null)
+[ -z "$DEV" ] && exit 0
+
+# --- 3) multicast route + IGMPv2 on the concrete device ---
+ip route replace 224.0.0.0/4 dev "$DEV" 2>/dev/null
+ip route replace 239.0.0.0/8 dev "$DEV" 2>/dev/null
+echo 2 > /proc/sys/net/ipv4/conf/"$DEV"/force_igmp_version 2>/dev/null
+
+exit 0
