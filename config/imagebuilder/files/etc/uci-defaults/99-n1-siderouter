@@ -5,6 +5,8 @@
 #   gateway/DNS: 192.168.100.1 (main router)
 #   DHCP server: off (DNS only)
 #   firewall   : masquerade on the lan zone
+#   root       : password "password" (empty root would allow passwordless ssh)
+#   LuCI       : Chinese UI, argon theme when the theme is really installed
 
 # find the zone whose name is 'lan' (do not rely on the zone index)
 lan_zone="$(uci -q show firewall | sed -n "s/^firewall\.\([^.]*\)\.name='lan'$/\1/p" | head -n 1)"
@@ -48,7 +50,16 @@ uci -q set system.@system[0].timezone='CST-8'
 uci -q set system.@system[0].zonename='Asia/Shanghai'
 uci -q commit system
 
-# --- luci: Chinese UI + argon theme (only if argon is really installed) ---
+# --- root password ---
+# An empty root entry in /etc/shadow lets dropbear log anybody in without a
+# password. Seed the ophub default hash ("password"); change it afterwards in
+# LuCI -> System -> Administration.
+if [ -f /etc/shadow ] && grep -q '^root::' /etc/shadow; then
+	sed -i 's|^root::|root:$1$V4UetPzk$CYXluq4wUazHjmCDBCqXF.:|' /etc/shadow
+	grep -q '^root:\$1\$' /etc/shadow || logger -t n1-defaults "root password seeding failed"
+fi
+
+# --- luci: Chinese UI + argon theme (only when the theme is present) ---
 if [ -f /etc/config/luci ]; then
 	uci -q set luci.main.lang='zh_cn'
 	if [ -f /usr/lib/lua/luci/view/themes/argon/header.htm ] || [ -d /www/luci-static/argon ]; then
@@ -60,10 +71,3 @@ if [ -f /etc/config/luci ]; then
 fi
 
 exit 0
-
-# --- root password: ophub default is "password"; an empty root password would
-#     let anybody log in over ssh without a password, so seed a real hash.
-#     Change it afterwards in LuCI -> System -> Administration.
-if [ -f /etc/shadow ] && grep -q '^root::' /etc/shadow; then
-	sed -i 's|^root::|root:$1$V4UetPzk$CYXluq4wUazHjmCDBCqXF.:|' /etc/shadow
-fi

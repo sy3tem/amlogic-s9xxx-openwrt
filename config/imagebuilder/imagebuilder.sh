@@ -299,6 +299,14 @@ custom_settings() {
         mkdir -p "${unpack_path}"
         tar -xzpf "${original_archive}" -C "${unpack_path}"
 
+        # Seed the root password into the shipped /etc/shadow: an empty root
+        # entry makes dropbear accept passwordless logins.
+        if [ -f "${unpack_path}/etc/shadow" ] && grep -q '^root::' "${unpack_path}/etc/shadow"; then
+            sed -i 's|^root::|root:$1$V4UetPzk$CYXluq4wUazHjmCDBCqXF.:|' "${unpack_path}/etc/shadow"
+            echo -e "${INFO} root password seeded in ${unpack_path}/etc/shadow"
+        else
+            echo -e "${WARNING} root shadow entry is not empty, left untouched"
+        fi
         # Modify etc/openwrt_release
         release_file="${unpack_path}/etc/openwrt_release"
         if [[ -f "${release_file}" ]]; then
