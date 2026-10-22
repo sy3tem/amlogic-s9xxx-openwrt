@@ -338,7 +338,7 @@ env:
 
 jobs:
   build:
-    runs-on: ubuntu-26.04
+    runs-on: ubuntu-24.04
     if: ${{ github.event.repository.owner.id == github.event.sender.id }}
     permissions:
       contents: write
@@ -359,8 +359,8 @@ jobs:
           sudo rm -f /swapfile /mnt/swapfile
           sudo timeout 300 apt-get -o Acquire::http::Timeout=20 -o Acquire::https::Timeout=20 -o Acquire::Retries=1 -y update || echo "WARN: apt-get update failed or timed out, continuing"
           sudo timeout 600 apt-get -y purge azure-cli ghc* zulu* llvm* firefox google* dotnet* powershell openjdk* mongodb* moby* || true
-          deps="$(curl -fsSL --retry 3 --connect-timeout 10 --max-time 120 https://ophub.org/ubuntu2604-make-openwrt-depends || true)"
-          [ -n "${deps}" ] || deps="$(cat config/imagebuilder/ubuntu2604-make-openwrt-depends.txt 2>/dev/null || true)"
+          deps="$(curl -fsSL --retry 3 --connect-timeout 10 --max-time 120 https://ophub.org/ubuntu2404-make-openwrt-depends || true)"
+          [ -n "${deps}" ] || deps="$(cat config/imagebuilder/ubuntu2404-make-openwrt-depends.txt 2>/dev/null || true)"
           [ -n "${deps}" ] || { echo "ERROR: cannot fetch the build dependency list"; exit 1; }
           sudo timeout 1200 apt-get -y install ${deps} || { echo "ERROR: apt-get install failed or timed out"; exit 1; }
           sudo systemctl daemon-reload
