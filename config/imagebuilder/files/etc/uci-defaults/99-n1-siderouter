@@ -48,10 +48,14 @@ uci -q set system.@system[0].timezone='CST-8'
 uci -q set system.@system[0].zonename='Asia/Shanghai'
 uci -q commit system
 
-# --- luci: Chinese UI + argon theme ---
+# --- luci: Chinese UI + argon theme (only if argon is really installed) ---
 if [ -f /etc/config/luci ]; then
 	uci -q set luci.main.lang='zh_cn'
-	uci -q set luci.main.mediaurlbase='/luci-static/argon'
+	if [ -f /usr/lib/lua/luci/view/themes/argon/header.htm ] || [ -d /www/luci-static/argon ]; then
+		uci -q set luci.main.mediaurlbase='/luci-static/argon'
+	else
+		uci -q set luci.main.mediaurlbase='/luci-static/bootstrap'
+	fi
 	uci -q commit luci
 fi
 
