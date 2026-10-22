@@ -206,12 +206,14 @@ custom_openclash_core() {
     echo -e "${STEPS} Bundling OpenClash mihomo core..."
 
     local arch tag url core_dir core_file
-    case "$(uname -m)" in
-        x86_64)  arch="amd64" ;;
-        aarch64) arch="arm64" ;;
-        armv7l)  arch="armv7" ;;
-        *)       arch="arm64" ;;
+    # The runner is x86_64, the *target* decides which core we need.
+    case "$(grep -oE 'CONFIG_TARGET_ARCH_PACKAGES="[^"]+"' ${imagebuilder_path}/.config 2>/dev/null)" in
+        *aarch64*) arch="arm64" ;;
+        *x86_64*)  arch="amd64" ;;
+        *arm*)     arch="armv7" ;;
+        *)         arch="arm64" ;;
     esac
+    echo -e "${INFO} target package arch: ${arch}"
 
     core_dir="files/etc/openclash/core"
     core_file="${core_dir}/clash_meta"
