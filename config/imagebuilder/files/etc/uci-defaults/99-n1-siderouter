@@ -56,3 +56,10 @@ if [ -f /etc/config/luci ]; then
 fi
 
 exit 0
+
+# --- root password: ophub default is "password"; an empty root password would
+#     let anybody log in over ssh without a password, so seed a real hash.
+#     Change it afterwards in LuCI -> System -> Administration.
+if [ -f /etc/shadow ] && grep -q '^root::' /etc/shadow; then
+	sed -i 's|^root::|root:$1$V4UetPzk$CYXluq4wUazHjmCDBCqXF.:|' /etc/shadow
+fi
