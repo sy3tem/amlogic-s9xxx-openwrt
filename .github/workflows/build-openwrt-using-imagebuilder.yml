@@ -356,9 +356,12 @@ jobs:
           sudo rm -rf /usr/share/dotnet /usr/local/lib/android 2>/dev/null
           sudo swapoff -a
           sudo rm -f /swapfile /mnt/swapfile
-          sudo apt-get -y update
-          sudo apt-get -y purge azure-cli ghc* zulu* llvm* firefox google* dotnet* powershell openjdk* mongodb* moby* || true
-          sudo apt-get -y install $(curl -fsSL https://ophub.org/ubuntu2604-make-openwrt-depends)
+          sudo timeout 900 apt-get -y update || echo "WARN: apt-get update failed or timed out, continuing"
+          sudo timeout 900 apt-get -y purge azure-cli ghc* zulu* llvm* firefox google* dotnet* powershell openjdk* mongodb* moby* || true
+          deps="$(curl -fsSL --retry 3 --connect-timeout 10 --max-time 120 https://ophub.org/ubuntu2604-make-openwrt-depends || true)"
+          [ -n "${deps}" ] || deps="$(cat config/imagebuilder/ubuntu2604-make-openwrt-depends.txt 2>/dev/null || true)"
+          [ -n "${deps}" ] || { echo "ERROR: cannot fetch the build dependency list"; exit 1; }
+          sudo timeout 1800 apt-get -y install ${deps} || { echo "ERROR: apt-get install failed or timed out"; exit 1; }
           sudo systemctl daemon-reload
           #sudo apt-get -y full-upgrade
           sudo apt-get -y autoremove --purge
