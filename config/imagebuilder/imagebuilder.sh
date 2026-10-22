@@ -351,7 +351,7 @@ adjust_settings
 custom_packages
 custom_config
 custom_files
-custom_openclash_core
+# custom_openclash_core   # OpenClash removed for now
 rebuild_firmware
 custom_settings
 #
