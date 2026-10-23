@@ -71,7 +71,6 @@ fi
 # the data partition carries the EMMC_SHARED label (optbind creates it on the
 # free space of a directly flashed eMMC, or reuses the installer's p4)
 if [ -f /etc/config/fstab ]; then
-	uci -q set fstab.@global[0].anon_mount='0'
 	uci -q delete fstab.opt
 	uci -q add fstab mount >/dev/null
 	uci -q set fstab.@mount[-1].target='/opt'

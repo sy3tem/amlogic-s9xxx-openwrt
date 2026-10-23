@@ -1,0 +1,27 @@
+#!/bin/sh
+# Mount the shared eMMC partition at /opt as early as possible.
+#
+# ophub's block-mount runs later and, with anon_mount=1, would otherwise mount
+# the same partition at /mnt/mmcblk2p4. Doing it here (preinit, after
+# config_generate) means the device is already busy when block-mount looks at
+# it, so nothing lands under /mnt and /opt is the only mount point.
+#
+# The mount is best effort: a missing partition or a read-only rootfs must not
+# stop the boot.
+
+. /lib/functions/preinit.sh
+
+mount_opt_shared() {
+	local dev
+
+	[ -d /opt ] || mkdir -p /opt 2>/dev/null
+	mountpoint -q /opt && return 0
+
+	dev=$(blkid -L EMMC_SHARED 2>/dev/null)
+	[ -n "${dev}" ] || return 0
+
+	mount "${dev}" /opt 2>/dev/null
+	return 0
+}
+
+boot_hook_add preinit_main mount_opt_shared
