@@ -1,8 +1,12 @@
 #!/bin/sh /etc/rc.common
-# /opt = the shared eMMC partition (p4, label EMMC_SHARED), R28S scheme:
+# /opt = the shared eMMC partition (p4, label EMMC_SHARED), R28S scheme with
+# explicit EXT4:
 #   1) grow p4 to the end of the disk (8G / 32G / 128G / 256G boards),
-#   2) mount it at /opt (fstab label entry is written by 99-n1-siderouter),
-#   3) grow the filesystem to the new partition size.
+#   2) if the partition is still btrfs (ophub creates it that way) and empty,
+#      reformat it as ext4 -- this happens on a fresh install; a partition that
+#      already carries data is left untouched,
+#   3) mount at /opt (fstab label entry is written by 99-n1-siderouter),
+#   4) resize2fs to the new partition size.
 # No bind mount, no symlink, no auto-mount of the spare rootfs slot.
 START=98
 STOP=10
@@ -29,7 +33,6 @@ grow_partition() {
 	csz=$(cat "/sys/class/block/${diskname}p4/size" 2>/dev/null)
 	[ -n "${start}" ] && [ -n "${dsz}" ] && [ -n "${csz}" ] || return 0
 
-	# already at the end of the disk
 	[ "${dsz}" -gt $((start + csz)) ] || return 0
 
 	logger -t optbind "growing p4: ${csz} -> $((dsz - start - 2048)) sectors"
@@ -38,6 +41,33 @@ grow_partition() {
 	partx -u -n 4 "${disk}" >/dev/null 2>&1
 	sync
 	sleep 1
+}
+
+ensure_ext4() {
+	local dev fstype chk entries
+
+	dev=$(label_dev EMMC_SHARED)
+	[ -n "${dev}" ] || return 0
+	fstype=$(blkid -o value -s TYPE "${dev}" 2>/dev/null)
+
+	[ "${fstype}" = "ext4" ] && return 0
+
+	# ophub formats p4 as btrfs. Only replace it when it is empty, so an
+	# existing data partition is never destroyed by an upgrade.
+	chk=/tmp/.optchk
+	mkdir -p "${chk}"
+	if mount -o ro "${dev}" "${chk}" 2>/dev/null; then
+		entries=$(ls -A "${chk}" 2>/dev/null | wc -l)
+		umount "${chk}" 2>/dev/null
+		if [ "${entries}" -eq 0 ]; then
+			logger -t optbind "reformatting ${dev} (${fstype}) as ext4"
+			mkfs.ext4 -F -L EMMC_SHARED "${dev}" >/dev/null 2>&1
+		else
+			logger -t optbind "${dev} is ${fstype} and not empty, left as is"
+		fi
+	else
+		logger -t optbind "cannot mount ${dev} for inspection, left as is"
+	fi
 }
 
 start() {
@@ -52,15 +82,14 @@ start() {
 	mkdir -p /opt
 	if ! mountpoint -q /opt; then
 		grow_partition
+		ensure_ext4
 		mount -L EMMC_SHARED /opt 2>/dev/null || return 0
 	fi
 
-	# grow the filesystem to the new partition size
 	dev=$(label_dev EMMC_SHARED)
-	case "$(blkid -o value -s TYPE "${dev}" 2>/dev/null)" in
-		btrfs) btrfs filesystem resize max /opt >/dev/null 2>&1 ;;
-		ext4)  resize2fs "${dev}" >/dev/null 2>&1 ;;
-	esac
+	if [ -n "${dev}" ] && [ "$(blkid -o value -s TYPE "${dev}" 2>/dev/null)" = "ext4" ]; then
+		resize2fs "${dev}" >/dev/null 2>&1
+	fi
 }
 
 stop() {

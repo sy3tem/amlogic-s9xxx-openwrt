@@ -78,8 +78,8 @@ if [ -f /etc/config/fstab ]; then
 	uci -q add fstab mount >/dev/null
 	uci -q set fstab.@mount[-1].target='/opt'
 	uci -q set fstab.@mount[-1].label='EMMC_SHARED'
-	uci -q set fstab.@mount[-1].fstype='btrfs'
-	uci -q set fstab.@mount[-1].options='compress=zstd:6'
+	uci -q set fstab.@mount[-1].fstype='auto'
+	uci -q set fstab.@mount[-1].options='noatime'
 	uci -q set fstab.@mount[-1].enabled='1'
 	uci -q commit fstab
 fi
