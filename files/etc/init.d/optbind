@@ -1,42 +1,24 @@
 #!/bin/sh /etc/rc.common
-# Put the big shared eMMC partition (EMMC_SHARED, p4) on /opt.
+# /opt = the shared eMMC partition (p4, label EMMC_SHARED).
 #
-# ophub's installer lays the eMMC out as:
-#   p1 EMMC_BOOT   (vfat)  -> /boot
-#   p2 EMMC_ROOTFS1(btrfs) -> /            (rootfs slot A)
-#   p3 EMMC_ROOTFS2(btrfs) -> spare        (rootfs slot B, not mounted)
-#   p4 EMMC_SHARED (btrfs) -> /opt         (all remaining space)
-#
-# fstab's `anon_mount` is disabled by 99-n1-siderouter, otherwise block-mount
-# auto-mounts p3 and p4 under /mnt/mmcblk2pX. Here we mount p4 at /opt and keep
-# /mnt/mmcblk2p4 as a symlink, because the Amlogic Service plugin uploads
-# firmware to that exact path.
+# Same scheme as the R28S firmware:
+#   * fstab carries a plain label based mount entry (99-n1-siderouter writes it),
+#   * block-mount mounts it at boot; this service is only a safety net in case
+#     the block event arrives late,
+#   * no bind mount, no symlink, no auto-mount of the spare rootfs slot.
 START=98
 STOP=10
 
-wait_for_device() {
+start() {
 	i=0
 	while [ "$i" -lt 30 ]; do
-		blkid -L EMMC_SHARED >/dev/null 2>&1 && return 0
+		blkid -L EMMC_SHARED >/dev/null 2>&1 && break
 		sleep 1
 		i=$((i + 1))
 	done
-	return 1
-}
-
-start() {
-	wait_for_device || return 0
 
 	mkdir -p /opt
-	mountpoint -q /opt || mount -L EMMC_SHARED /opt || return 0
-
-	# the plugin expects /mnt/mmcblk2p4; make it a symlink to the mount
-	if [ ! -L /mnt/mmcblk2p4 ]; then
-		umount -l /mnt/mmcblk2p4 2>/dev/null
-		rm -rf /mnt/mmcblk2p4
-		ln -s /opt /mnt/mmcblk2p4
-	fi
-	rm -rf /mnt/mmcblk2p3 2>/dev/null
+	mountpoint -q /opt || mount -L EMMC_SHARED /opt 2>/dev/null
 }
 
 stop() {
