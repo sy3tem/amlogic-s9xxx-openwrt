@@ -347,6 +347,35 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v6
 
+      - name: Validate overlay file encodings
+        run: |
+          set -e
+          bad=0
+          while IFS= read -r -d '' f; do
+            if head -c 3 "$f" | grep -q $'\xef\xbb\xbf'; then
+              echo "::error file=$f::UTF-8 BOM found"
+              bad=1
+            fi
+            if grep -q $'\r' "$f"; then
+              echo "::error file=$f::CRLF line endings found"
+              bad=1
+            fi
+          done < <(find config/imagebuilder/files files -type f -print0 2>/dev/null)
+          for f in config/imagebuilder/config config/imagebuilder/ubuntu2404-make-openwrt-depends.txt \
+                   config/imagebuilder/ubuntu2604-make-openwrt-depends.txt config/imagebuilder/imagebuilder.sh; do
+            [ -f "$f" ] || continue
+            if head -c 3 "$f" | grep -q $'\xef\xbb\xbf'; then
+              echo "::error file=$f::UTF-8 BOM found"
+              bad=1
+            fi
+            if grep -q $'\r' "$f"; then
+              echo "::error file=$f::CRLF line endings found"
+              bad=1
+            fi
+          done
+          [ "$bad" -eq 0 ] || exit 1
+          echo "overlay encodings are clean (no BOM, no CRLF)"
+
       - name: Initialize the build environment
         id: init
         env:
@@ -453,7 +482,7 @@ jobs:
             - Default WIFI name: `OpenWrt`
             - Default WIFI password: `none`
             ### Install to EMMC
-            - Login to OpenWrt → `System` → `Amlogic Service` → `Install OpenWrt`
+            - Login to OpenWrt 鈫?`System` 鈫?`Amlogic Service` 鈫?`Install OpenWrt`
             ### Applicable Platform
-            - 🐧 `arm64`
-            - 🐋 Docker image: https://hub.docker.com/u/ophub
+            - 馃惂 `arm64`
+            - 馃悑 Docker image: https://hub.docker.com/u/ophub
