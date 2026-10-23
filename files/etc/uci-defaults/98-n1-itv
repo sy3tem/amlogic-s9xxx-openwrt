@@ -1,0 +1,15 @@
+#!/bin/sh
+#
+# IGMPv2 for IPTV multicast. Most operators only speak IGMPv2, and a v3 join
+# on the side-router can be silently ignored by the upstream snooping bridge.
+# Persisted in /etc/sysctl.conf so it survives reboots.
+
+echo 2 > /proc/sys/net/ipv4/conf/all/force_igmp_version 2>/dev/null
+echo 2 > /proc/sys/net/ipv4/conf/default/force_igmp_version 2>/dev/null
+
+grep -q 'force_igmp_version' /etc/sysctl.conf 2>/dev/null || cat >> /etc/sysctl.conf <<'SYSCTL'
+net.ipv4.conf.all.force_igmp_version=2
+net.ipv4.conf.default.force_igmp_version=2
+SYSCTL
+
+exit 0

@@ -24,17 +24,15 @@ uci -q delete network.lan.ip6addr
 # single NIC: drop any wan interface left over from the generic target
 uci -q delete network.wan
 uci -q delete network.wan6
-
-# --- IPv6: DHCPv6 client on the LAN bridge -----------------------------------
-# This box is a side-router: it does NOT serve DHCPv6/RA (clients keep getting
-# IPv6 from the main router on the same L2). It only needs a global address of
-# its own, otherwise LuCI shows a v4-only router.
+# --- IPv6: DHCPv6 client on the LAN bridge (fixed IPv4, dynamic IPv6) ---
 uci -q set network.lan6='interface'
 uci -q set network.lan6.proto='dhcpv6'
 uci -q set network.lan6.device='@lan'
 uci -q set network.lan6.reqaddress='try'
 uci -q set network.lan6.reqprefix='no'
 uci -q commit network
+
+
 
 # --- dhcp: DNS only, no address distribution ---
 uci -q set dhcp.lan.ignore='1'
@@ -74,9 +72,8 @@ if [ -f /etc/config/dockerd ]; then
 	uci -q set dockerd.globals.data_root='/opt/docker/'
 	uci -q commit dockerd
 fi
-# --- luci: Chinese UI + argon theme (only when the theme is present) ---
+# --- luci: argon theme (only when the theme is present) ---
 if [ -f /etc/config/luci ]; then
-	uci -q set luci.main.lang='zh_cn'
 	if [ -f /usr/lib/lua/luci/view/themes/argon/header.htm ] || [ -d /www/luci-static/argon ]; then
 		uci -q set luci.main.mediaurlbase='/luci-static/argon'
 	else

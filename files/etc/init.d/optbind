@@ -1,31 +1,33 @@
 #!/bin/sh /etc/rc.common
-# Bind the big shared eMMC partition onto /opt.
+# /opt = the shared eMMC partition (p4, label EMMC_SHARED).
 #
-# ophub's installer lays the eMMC out as:
-#   p1 EMMC_BOOT   (vfat)  -> /boot
-#   p2 EMMC_ROOTFS1(btrfs) -> /mnt/mmcblk2p2   (spare rootfs)
-#   p3 EMMC_ROOTFS2(btrfs) -> /               (running rootfs)
-#   p4 EMMC_SHARED (btrfs) -> /mnt/mmcblk2p4  (all remaining space)
-#
-# /opt is therefore not a partition of its own: it is the shared partition.
-# Docker keeps using /mnt/mmcblk2p4/docker, which is the same directory as
-# /opt/docker after the bind.
+# Deliberately minimal: only a label based mount. No partition table edits, no
+# filesystem grow, no bind mount and no symlink. Anything that rewrites the MBR
+# at boot risks the Amlogic boot area, so it is not done here.
 START=98
 STOP=10
 
 start() {
 	i=0
 	while [ "$i" -lt 30 ]; do
-		mountpoint -q /mnt/mmcblk2p4 && break
+		blkid -L EMMC_SHARED >/dev/null 2>&1 && break
 		sleep 1
 		i=$((i + 1))
 	done
-	mountpoint -q /mnt/mmcblk2p4 || return 0
-	mountpoint -q /opt && return 0
+
+	[ -n "$(blkid -L EMMC_SHARED 2>/dev/null)" ] || return 0
+
 	mkdir -p /opt
-	mount --bind /mnt/mmcblk2p4 /opt
+	mountpoint -q /opt || mount -L EMMC_SHARED /opt 2>/dev/null
+
+	# luci-app-amlogic hardcodes /mnt/<disk>p4 as its upload directory and its
+	# update script cds there, so expose the mount under that name as well.
+	if [ ! -L /mnt/mmcblk2p4 ]; then
+		rm -rf /mnt/mmcblk2p4
+		ln -s /opt /mnt/mmcblk2p4
+	fi
 }
 
 stop() {
-	mountpoint -q /opt && umount /opt
+	umount /opt 2>/dev/null
 }
