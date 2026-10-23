@@ -19,6 +19,13 @@ start() {
 
 	mkdir -p /opt
 	mountpoint -q /opt || mount -L EMMC_SHARED /opt 2>/dev/null
+
+	# luci-app-amlogic hardcodes /mnt/<disk>p4 as its upload directory and its
+	# update script cds there, so expose the mount under that name as well.
+	if [ ! -L /mnt/mmcblk2p4 ]; then
+		rm -rf /mnt/mmcblk2p4
+		ln -s /opt /mnt/mmcblk2p4
+	fi
 }
 
 stop() {
