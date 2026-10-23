@@ -1,77 +1,9 @@
 #!/bin/sh
 #
-# /opt on the free space after the rootfs partition (R28S-style).
-#
-# The image already carries a small p3 (see scripts/add-opt-part.py), so the
-# kernel sees /dev/mmcblkXp3 from the first boot and we only have to:
-#   1) grow the partition entry to the end of the eMMC
-#   2) format it ext4 (only when it has no filesystem yet)
-#   3) mount it at /opt and persist the mount in /etc/config/fstab
-#
-# Every step is idempotent and nothing ever reboots: a failure just means /opt
-# stays unmounted until the next boot.
+# /opt is the shared eMMC partition (p4, EMMC_SHARED, mounted by ophub at
+# /mnt/mmcblk2p4). There is nothing to partition or format here: just enable
+# the init script that bind-mounts it onto /opt after boot.
 
-log() { logger -t n1-opt "$*"; }
+[ -x /etc/init.d/optbind ] && /etc/init.d/optbind enable
 
-mkdir -p /opt
-grep -q " /opt " /proc/mounts && exit 0
-
-# ---- 1) locate the disk we booted from ----------------------------------------
-ROMPART=$(awk '$2 == "/rom" { print $1; exit }' /proc/mounts 2>/dev/null)
-[ -n "${ROMPART}" ] || ROMPART=$(awk '$2 == "/" { print $1; exit }' /proc/mounts 2>/dev/null)
-case "${ROMPART}" in
-	/dev/mmcblk*p*) ;;
-	*) ROMPART=$(awk '$1 ~ /^\/dev\/mmcblk/ { print $1; exit }' /proc/mounts 2>/dev/null) ;;
-esac
-case "${ROMPART}" in
-	/dev/mmcblk*p*) ;;
-	*) log "no mmcblk root partition (${ROMPART}), skip"; exit 0 ;;
-esac
-
-DISK="${ROMPART%p*}"
-DISKNAME="${DISK##*/}"
-PART="${DISK}3"
-
-# ---- 2) wait for p3 (first boot may race with the mmc scan) -------------------
-i=0
-while [ ! -b "${PART}" ] && [ "${i}" -lt 10 ]; do
-	sleep 1
-	i=$((i + 1))
-done
-[ -b "${PART}" ] || { log "no ${PART} in this image, skip"; exit 0; }
-
-# ---- 3) grow p3 to the end of the disk ----------------------------------------
-START=$(cat "/sys/class/block/${DISKNAME}p3/start" 2>/dev/null)
-DSZ=$(cat "/sys/class/block/${DISKNAME}/size" 2>/dev/null)
-CSZ=$(cat "/sys/class/block/${DISKNAME}p3/size" 2>/dev/null)
-if [ -n "${START}" ] && [ -n "${DSZ}" ] && [ -n "${CSZ}" ] && [ "${DSZ}" -gt $((START + CSZ)) ] &&
-   command -v sfdisk >/dev/null 2>&1; then
-	NEWSZ=$((DSZ - START - 2048))
-	log "growing p3: ${CSZ} -> ${NEWSZ} sectors"
-	echo "start=${START}, size=${NEWSZ}, type=83" | \
-		sfdisk -N 3 --force --no-reread "${DISK}" >/dev/null 2>&1
-	partx -u -n 3 "${DISK}" >/dev/null 2>&1
-	sync
-	sleep 1
-fi
-
-# ---- 4) filesystem ------------------------------------------------------------
-FS=$(blkid -o value -s TYPE "${PART}" 2>/dev/null)
-if [ -z "${FS}" ]; then
-	mkfs.ext4 -F -L opt "${PART}" >/dev/null 2>&1 || { log "mkfs.ext4 failed"; exit 0; }
-else
-	e2fsck -fy "${PART}" >/dev/null 2>&1
-	resize2fs "${PART}" >/dev/null 2>&1
-fi
-
-# ---- 5) fstab + mount ----------------------------------------------------------
-uci -q delete fstab.opt
-uci -q set fstab.opt=mount
-uci -q set fstab.opt.target='/opt'
-uci -q set fstab.opt.label='opt'
-uci -q set fstab.opt.enabled='1'
-uci commit fstab
-
-mount -L opt /opt 2>/dev/null || mount "${PART}" /opt 2>/dev/null
-log "/opt ready on ${PART} ($(df -h /opt 2>/dev/null | tail -n1 | awk '{print $2}'))"
 exit 0

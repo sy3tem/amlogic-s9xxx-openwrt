@@ -434,14 +434,6 @@ jobs:
           kernel_usage: ${{ inputs.kernel_usage }}
           builder_name: ${{ inputs.builder_name }}
 
-      - name: Add /opt partition to the image
-        if: ${{ env.PACKAGED_STATUS == 'success' && !cancelled() }}
-        run: |
-          for f in "${PACKAGED_OUTPUTPATH}"/openwrt_*.img.gz; do
-            [ -f "$f" ] || continue
-            python3 scripts/add-opt-part.py "$f" 256
-          done
-          ls -lh "${PACKAGED_OUTPUTPATH}"
       - name: Upload packaged OpenWrt to Release
         uses: ophub/upload-to-releases@main
         if: ${{ env.PACKAGED_STATUS == 'success' && !cancelled() }}
