@@ -1,0 +1,84 @@
+name: experimental kernel 7.3 image
+
+on:
+  workflow_dispatch:
+    inputs:
+      artifact_id:
+        description: "kernel artifact id from the 7.3 build"
+        default: "12504469235"
+        type: string
+      kernel_ver:
+        description: "version tag used inside the artifact"
+        default: "7.3"
+        type: string
+
+jobs:
+  image:
+    runs-on: ubuntu-26.04-arm
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download the existing kernel artifact
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -eux
+          curl -fL -H "Authorization: Bearer ${GH_TOKEN}" \
+            -H "Accept: application/vnd.github+json" \
+            -o kern.zip \
+            "https://api.github.com/repos/${{ github.repository }}/actions/artifacts/${{ inputs.artifact_id }}/zip"
+          mkdir -p kern && unzip -o kern.zip -d kern
+          ls -lh kern
+
+      - name: Unpack kernel
+        run: |
+          set -eux
+          mkdir -p k
+          tar -C k -xzf "kern/boot-${{ inputs.kernel_ver }}-ophub.tar.gz"
+          ls -lh k/boot/Image
+          ls -lh k/boot/dtb/amlogic/meson-gxl-s905d-phicomm-n1.dtb
+
+      - name: Download the working image
+        run: |
+          set -eux
+          URL="https://github.com/sy3tem/amlogic-s9xxx-openwrt/releases/download"
+          TAG="OpenWrt_imagebuilder_immortalwrt_25.12-SNAPSHOT_2026.10"
+          FILE="openwrt_immortalwrt_amlogic_s905d_k6.18.58_2026.10.23.img.gz"
+          curl -fL --retry 5 -o base.img.gz "${URL}/${TAG}/${FILE}"
+          gzip -dk base.img.gz
+          ls -lh base.img
+
+      - name: Swap kernel and dtb in the boot partition
+        run: |
+          set -eux
+          LOOP=$(sudo losetup --find --show -P base.img)
+          echo "loop=$LOOP"
+          sudo mkdir -p /mnt/boot
+          sudo mount "${LOOP}p1" /mnt/boot
+          ls /mnt/boot | head -20
+          sudo cp k/boot/Image /mnt/boot/zImage
+          sudo cp k/boot/dtb/amlogic/meson-gxl-s905d-phicomm-n1.dtb \
+                  /mnt/boot/dtb/amlogic/meson-gxl-s905d-phicomm-n1.dtb
+          # storage/btrfs are built into this kernel, no initramfs needed
+          sudo sed -i 's|^INITRD=.*|INITRD=|' /mnt/boot/uEnv.txt
+          grep -E 'LINUX|INITRD|FDT|APPEND' /mnt/boot/uEnv.txt || true
+          sync
+          sudo umount /mnt/boot
+          sudo losetup -d "$LOOP"
+
+      - name: Repack and hash
+        run: |
+          set -eux
+          NAME="openwrt_immortalwrt_amlogic_s905d_k${{ inputs.kernel_ver }}_test.img"
+          mv base.img "$NAME"
+          gzip -1 "$NAME"
+          ls -lh "$NAME.gz"
+          sha256sum "$NAME.gz" | tee sha256.txt
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: test-image-k${{ inputs.kernel_ver }}
+          path: |
+            *.img.gz
+            sha256.txt
