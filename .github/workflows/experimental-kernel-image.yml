@@ -49,6 +49,45 @@ jobs:
           gzip -dk base.img.gz
           ls -lh base.img
 
+      - name: Build a boot.scr that works without initrd
+        run: |
+          set -eux
+          sudo timeout 600 apt-get install -y --no-install-recommends u-boot-tools \
+            || (sudo timeout 300 apt-get update && sudo timeout 600 apt-get install -y u-boot-tools)
+          cat > boot-noinitrd.cmd <<'EOF'
+          echo "Start AMLOGIC mainline U-boot (no initrd)"
+          if printenv bootfromsd; then exit; fi;
+          setenv loadaddr "0x44000000"
+          setenv l_mmc "0 1 2 3"
+          for devtype in "usb mmc" ; do
+            if test "${devtype}" = "mmc"; then
+              setenv l_mmc "1"
+            fi
+            for devnum in ${l_mmc} ; do
+              if test -e ${devtype} ${devnum} uEnv.txt; then
+                load ${devtype} ${devnum} ${loadaddr} uEnv.txt
+                env import -t ${loadaddr} ${filesize}
+                setenv bootargs ${APPEND}
+                if printenv mac; then
+                  setenv bootargs ${bootargs} mac=${mac}
+                elif printenv eth_mac; then
+                  setenv bootargs ${bootargs} mac=${eth_mac}
+                elif printenv ethaddr; then
+                  setenv bootargs ${bootargs} mac=${ethaddr}
+                fi
+                if load ${devtype} ${devnum} ${kernel_addr_r} ${LINUX}; then
+                  if load ${devtype} ${devnum} ${fdt_addr_r} ${FDT}; then
+                    fdt addr ${fdt_addr_r}
+                    booti ${kernel_addr_r} - ${fdt_addr_r}
+                  fi
+                fi
+              fi
+            fi
+          done
+          EOF
+          mkimage -C none -A arm -T script -d boot-noinitrd.cmd boot-noinitrd.scr
+          ls -l boot-noinitrd.scr
+
       - name: Swap kernel and dtb in the boot partition
         run: |
           set -eux
@@ -63,6 +102,10 @@ jobs:
           # storage/btrfs are built into this kernel, no initramfs needed
           sudo sed -i 's|^INITRD=.*|INITRD=|' /mnt/boot/uEnv.txt
           grep -E 'LINUX|INITRD|FDT|APPEND' /mnt/boot/uEnv.txt || true
+          # ophub's stock boot.scr only calls booti when INITRD could be loaded,
+          # so ship a variant that boots kernel+fdt without an initrd
+          sudo cp boot-noinitrd.scr /mnt/boot/boot.scr
+          sudo cp boot-noinitrd.scr /mnt/boot/boot-emmc.scr
           sync
           sudo umount /mnt/boot
           sudo losetup -d "$LOOP"
