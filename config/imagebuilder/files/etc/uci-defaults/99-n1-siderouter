@@ -67,15 +67,12 @@ if [ -f /etc/shadow ] && grep -q '^root::' /etc/shadow; then
 	grep -q '^root:\$1\$' /etc/shadow || logger -t n1-defaults "root password seeding failed"
 fi
 
-# --- installer: create the shared partition (p4) as EXT4 ----------------------
-# luci-app-amlogic formats p4 with this type when installing to eMMC
-# (0. script arg ${SHARED_FSTYPE}); setting it here means no post-install
-# reformat is needed.
-if [ -f /etc/config/amlogic ]; then
-	uci -q set amlogic.config.amlogic_shared_fstype='ext4'
-	uci -q commit amlogic
+# --- docker data on the shared partition (binds onto /opt at boot) ---
+if [ -f /etc/config/dockerd ]; then
+	uci -q set dockerd.globals.data_root='/opt/docker/'
+	uci -q commit dockerd
 fi
-# --- luci: Chinese UI + argon theme (only when the theme is present) ---
+# --- luci: argon theme (only when the theme is present) ---
 if [ -f /etc/config/luci ]; then
 	if [ -f /usr/lib/lua/luci/view/themes/argon/header.htm ] || [ -d /www/luci-static/argon ]; then
 		uci -q set luci.main.mediaurlbase='/luci-static/argon'
