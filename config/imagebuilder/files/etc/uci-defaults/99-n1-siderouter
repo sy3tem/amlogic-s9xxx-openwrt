@@ -77,7 +77,6 @@ if [ -f /etc/config/amlogic ]; then
 fi
 # --- luci: Chinese UI + argon theme (only when the theme is present) ---
 if [ -f /etc/config/luci ]; then
-	uci -q set luci.main.lang='zh_cn'
 	if [ -f /usr/lib/lua/luci/view/themes/argon/header.htm ] || [ -d /www/luci-static/argon ]; then
 		uci -q set luci.main.mediaurlbase='/luci-static/argon'
 	else
@@ -85,9 +84,6 @@ if [ -f /etc/config/luci ]; then
 	fi
 	uci -q commit luci
 fi
-
-# --- iStore: installer runs on first boot (needs internet) ---
-[ -x /etc/init.d/istore ] && /etc/init.d/istore enable
 
 # --- no wpad/hostapd in this build: drop a wireless config left over from an
 #     older install, otherwise LuCI keeps showing the Wireless menu ---
