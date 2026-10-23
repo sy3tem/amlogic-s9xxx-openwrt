@@ -1,0 +1,90 @@
+name: experimental kernel 7.3
+
+on:
+  workflow_dispatch:
+    inputs:
+      kernel_ver:
+        description: "kernel.org version"
+        default: "7.3"
+        type: string
+      use_ophub_config:
+        description: "base the .config on ophub's config-6.18"
+        default: true
+        type: boolean
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 240
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install build dependencies
+        run: |
+          set -x
+          for i in 1 2 3; do
+            sudo timeout 300 apt-get update && break || sleep 15
+          done
+          for i in 1 2 3; do
+            sudo timeout 900 apt-get install -y --no-install-recommends \
+              bc bison flex libssl-dev libelf-dev libncurses-dev dwarves \
+              cpio rsync kmod xz-utils zstd wget ca-certificates make gcc \
+              && break || sleep 15
+          done
+          gcc --version | head -1
+          nproc
+
+      - name: Fetch kernel source
+        run: |
+          set -eux
+          VER="${{ inputs.kernel_ver }}"
+          MAJ="${VER%%.*}"
+          curl -fL --retry 5 --retry-delay 10 -o "linux-${VER}.tar.xz" \
+            "https://cdn.kernel.org/pub/linux/kernel/v${MAJ}.x/linux-${VER}.tar.xz"
+          tar -xf "linux-${VER}.tar.xz"
+          ls -d "linux-${VER}"
+
+      - name: Prepare .config
+        run: |
+          set -eux
+          VER="${{ inputs.kernel_ver }}"
+          cd "linux-${VER}"
+          if [ "${{ inputs.use_ophub_config }}" = "true" ]; then
+            curl -fL --retry 5 -o .config \
+              https://raw.githubusercontent.com/ophub/kernel/main/kernel-config/release/stable/config-6.18
+          else
+            make defconfig
+          fi
+          make ARCH=arm64 olddefconfig
+          grep -E '^CONFIG_LOCALVERSION|^CONFIG_LOCALVERSION_AUTO' .config || true
+
+      - name: Compile kernel
+        run: |
+          set -eux
+          VER="${{ inputs.kernel_ver }}"
+          cd "linux-${VER}"
+          make -j"$(nproc)" ARCH=arm64 Image modules dtbs
+
+      - name: Package
+        run: |
+          set -eux
+          VER="${{ inputs.kernel_ver }}"
+          cd "linux-${VER}"
+          OUT="$PWD/../out"
+          mkdir -p "$OUT/boot/dtb/amlogic"
+          cp arch/arm64/boot/Image "$OUT/boot/Image"
+          cp .config "$OUT/boot/config-${VER}-ophub"
+          cp System.map "$OUT/boot/System.map-${VER}-ophub" 2>/dev/null || true
+          find arch/arm64/boot/dts/amlogic -name '*.dtb' -exec cp {} "$OUT/boot/dtb/amlogic/" \;
+          ls -lh "$OUT/boot" | head
+          tar -C "$OUT" -czf "$OUT/boot-${VER}-ophub.tar.gz" boot
+          make INSTALL_MOD_PATH="$OUT/modules" modules_install
+          tar -C "$OUT/modules" -czf "$OUT/modules-${VER}-ophub.tar.gz" lib
+          ls -lh "$OUT"/*.tar.gz
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: kernel-${{ inputs.kernel_ver }}-artifacts
+          path: out/*.tar.gz
+          if-no-files-found: warn
