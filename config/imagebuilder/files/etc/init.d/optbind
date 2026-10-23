@@ -10,7 +10,7 @@
 # /opt is therefore not a partition of its own: it is the shared partition.
 # Docker keeps using /mnt/mmcblk2p4/docker, which is the same directory as
 # /opt/docker after the bind.
-START=99
+START=98
 STOP=10
 
 start() {

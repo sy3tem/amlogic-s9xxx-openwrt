@@ -69,6 +69,11 @@ if [ -f /etc/shadow ] && grep -q '^root::' /etc/shadow; then
 	grep -q '^root:\$1\$' /etc/shadow || logger -t n1-defaults "root password seeding failed"
 fi
 
+# --- docker data on the shared partition (binds onto /opt at boot) ---
+if [ -f /etc/config/dockerd ]; then
+	uci -q set dockerd.globals.data_root='/opt/docker/'
+	uci -q commit dockerd
+fi
 # --- luci: Chinese UI + argon theme (only when the theme is present) ---
 if [ -f /etc/config/luci ]; then
 	uci -q set luci.main.lang='zh_cn'
