@@ -7,13 +7,13 @@ on:
         description: "kernel.org version"
         default: "7.3"
         type: string
-      use_ophub_config:
-        description: "base the .config on ophub's config-6.18"
+      build_test_image:
+        description: "patch the working image with this kernel (no initramfs) and upload it"
         default: true
         type: boolean
 
 jobs:
-  build:
+  kernel:
     runs-on: ubuntu-26.04-arm
     timeout-minutes: 240
     steps:
@@ -32,7 +32,6 @@ jobs:
               && break || sleep 15
           done
           gcc --version | head -1
-          nproc
 
       - name: Fetch kernel source
         run: |
@@ -42,21 +41,26 @@ jobs:
           curl -fL --retry 5 --retry-delay 10 -o "linux-${VER}.tar.xz" \
             "https://cdn.kernel.org/pub/linux/kernel/v${MAJ}.x/linux-${VER}.tar.xz"
           tar -xf "linux-${VER}.tar.xz"
-          ls -d "linux-${VER}"
 
       - name: Prepare .config
         run: |
           set -eux
           VER="${{ inputs.kernel_ver }}"
           cd "linux-${VER}"
-          if [ "${{ inputs.use_ophub_config }}" = "true" ]; then
-            curl -fL --retry 5 -o .config \
-              https://raw.githubusercontent.com/ophub/kernel/main/kernel-config/release/stable/config-6.18
-          else
-            make defconfig
-          fi
+          curl -fL --retry 5 -o .config \
+            https://raw.githubusercontent.com/ophub/kernel/main/kernel-config/release/stable/config-6.18
+          # boot straight from USB: no initramfs, so storage, root fs, serial and
+          # ethernet must be built in
+          scripts/config --enable BLK_DEV_SD --enable SCSI --enable USB \
+            --enable USB_XHCI_HCD --enable USB_STORAGE --enable USB_UAS \
+            --enable BTRFS_FS --enable EXT4_FS --enable F2FS_FS \
+            --enable DEVTMPFS --enable DEVTMPFS_MOUNT \
+            --enable SERIAL_8250 --enable SERIAL_8250_CONSOLE --enable SERIAL_MESON \
+            --enable DWMAC_MESON --enable MESON_GXL_PHY
           make ARCH=arm64 olddefconfig
-          grep -E '^CONFIG_LOCALVERSION|^CONFIG_LOCALVERSION_AUTO' .config || true
+          for o in BLK_DEV_SD USB_STORAGE BTRFS_FS DEVTMPFS_MOUNT DWMAC_MESON; do
+            grep -E "^CONFIG_${o}=" .config || echo "MISSING CONFIG_${o}"
+          done
 
       - name: Compile kernel
         run: |
@@ -65,7 +69,7 @@ jobs:
           cd "linux-${VER}"
           make -j"$(nproc)" ARCH=arm64 Image modules dtbs
 
-      - name: Package
+      - name: Package kernel
         run: |
           set -eux
           VER="${{ inputs.kernel_ver }}"
@@ -76,15 +80,74 @@ jobs:
           cp .config "$OUT/boot/config-${VER}-ophub"
           cp System.map "$OUT/boot/System.map-${VER}-ophub" 2>/dev/null || true
           find arch/arm64/boot/dts/amlogic -name '*.dtb' -exec cp {} "$OUT/boot/dtb/amlogic/" \;
-          ls -lh "$OUT/boot" | head
+          test -f "$OUT/boot/dtb/amlogic/meson-gxl-s905d-phicomm-n1.dtb"
+          ls -lh "$OUT/boot/Image" "$OUT/boot/dtb/amlogic/meson-gxl-s905d-phicomm-n1.dtb"
           tar -C "$OUT" -czf "$OUT/boot-${VER}-ophub.tar.gz" boot
           make INSTALL_MOD_PATH="$OUT/modules" modules_install
           tar -C "$OUT/modules" -czf "$OUT/modules-${VER}-ophub.tar.gz" lib
           ls -lh "$OUT"/*.tar.gz
 
       - uses: actions/upload-artifact@v4
-        if: always()
         with:
-          name: kernel-${{ inputs.kernel_ver }}-artifacts
+          name: kernel-${{ inputs.kernel_ver }}
           path: out/*.tar.gz
-          if-no-files-found: warn
+
+  test_image:
+    needs: kernel
+    if: ${{ inputs.build_test_image == 'true' }}
+    runs-on: ubuntu-26.04-arm
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: kernel-${{ inputs.kernel_ver }}
+          path: kern
+
+      - name: Unpack kernel
+        run: |
+          set -eux
+          mkdir -p k
+          tar -C k -xzf kern/boot-${{ inputs.kernel_ver }}-ophub.tar.gz
+          ls -lh k/boot/Image
+
+      - name: Download the working image
+        run: |
+          set -eux
+          URL="https://github.com/sy3tem/amlogic-s9xxx-openwrt/releases/download"
+          TAG="OpenWrt_imagebuilder_immortalwrt_25.12-SNAPSHOT_2026.10"
+          FILE="openwrt_immortalwrt_amlogic_s905d_k6.18.58_2026.10.23.img.gz"
+          curl -fL --retry 5 -o base.img.gz "${URL}/${TAG}/${FILE}"
+          gzip -dk base.img.gz
+          ls -lh base.img
+
+      - name: Swap kernel and dtb in the boot partition
+        run: |
+          set -eux
+          LOOP=$(sudo losetup --find --show -P base.img)
+          echo "loop=$LOOP"
+          sudo mkdir -p /mnt/boot
+          sudo mount "${LOOP}p1" /mnt/boot
+          ls /mnt/boot | head
+          sudo cp k/boot/Image /mnt/boot/zImage
+          sudo cp k/boot/dtb/amlogic/meson-gxl-s905d-phicomm-n1.dtb \
+                  /mnt/boot/dtb/amlogic/meson-gxl-s905d-phicomm-n1.dtb
+          sudo sed -i 's|^INITRD=.*|INITRD=|' /mnt/boot/uEnv.txt
+          grep -E 'LINUX|INITRD|FDT|APPEND' /mnt/boot/uEnv.txt || true
+          sync
+          sudo umount /mnt/boot
+          sudo losetup -d "$LOOP"
+
+      - name: Repack
+        run: |
+          set -eux
+          mv base.img "openwrt_immortalwrt_amlogic_s905d_k${{ inputs.kernel_ver }}_test.img"
+          gzip -1 "openwrt_immortalwrt_amlogic_s905d_k${{ inputs.kernel_ver }}_test.img"
+          ls -lh *.img.gz
+          sha256sum *.img.gz
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: test-image-k${{ inputs.kernel_ver }}
+          path: "*.img.gz"
