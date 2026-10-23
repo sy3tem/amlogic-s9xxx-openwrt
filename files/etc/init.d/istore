@@ -1,0 +1,40 @@
+#!/bin/sh /etc/rc.common
+# Install iStore once, in the background (it needs an internet connection).
+#
+# iStore publishes ipk packages on https://istore.istoreos.com/repo/all/store;
+# its own installer (shipped at /usr/share/systools/istore-reinstall.run) picks
+# the right package and handles both opkg and apk based systems. The install is
+# retried on every boot until the marker file exists, so a router that boots
+# without internet still ends up with a store later.
+START=99
+STOP=05
+
+MARKER=/etc/istore-installed
+LOG=/tmp/istore-install.log
+
+installed() {
+	[ -f "${MARKER}" ] && return 0
+	# some installs land without the marker; accept an obvious store file
+	[ -f /usr/lib/lua/luci/controller/store.lua ] && return 0
+	[ -f /www/luci-static/resources/view/store/store.js ] && return 0
+	return 1
+}
+
+start() {
+	installed && return 0
+	[ -x /usr/share/systools/istore-reinstall.run ] || return 0
+	[ -x /usr/bin/curl ] || return 0
+
+	logger -t istore "installing iStore in the background"
+	(
+		sh /usr/share/systools/istore-reinstall.run >"${LOG}" 2>&1
+		rc=$?
+		logger -t istore "iStore installer exited with ${rc}"
+		if [ "${rc}" -eq 0 ] && installed; then
+			touch "${MARKER}"
+			rm -rf /tmp/luci-indexcache /tmp/luci-modulecache/*
+			logger -t istore "iStore installed, reloading rpcd"
+			/etc/init.d/rpcd reload 2>/dev/null
+		fi
+	) &
+}
