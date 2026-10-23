@@ -70,4 +70,9 @@ if [ -f /etc/config/luci ]; then
 	uci -q commit luci
 fi
 
+# --- no wpad/hostapd in this build: drop a wireless config left over from an
+#     older install, otherwise LuCI keeps showing the Wireless menu ---
+if [ ! -x /usr/sbin/wpad ] && [ ! -x /usr/sbin/hostapd ]; then
+	rm -f /etc/config/wireless
+fi
 exit 0
