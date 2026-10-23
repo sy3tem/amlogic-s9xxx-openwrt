@@ -83,6 +83,14 @@ if [ -f /etc/config/fstab ]; then
 	uci -q set fstab.@mount[-1].enabled='1'
 	uci -q commit fstab
 fi
+# --- installer: create the shared partition (p4) as EXT4 ----------------------
+# luci-app-amlogic formats p4 with this type when installing to eMMC
+# (0. script arg ${SHARED_FSTYPE}); setting it here means no post-install
+# reformat is needed.
+if [ -f /etc/config/amlogic ]; then
+	uci -q set amlogic.config.amlogic_shared_fstype='ext4'
+	uci -q commit amlogic
+fi
 # --- docker data on the shared partition (binds onto /opt at boot) ---
 if [ -f /etc/config/dockerd ]; then
 	uci -q set dockerd.globals.data_root='/opt/docker/'
