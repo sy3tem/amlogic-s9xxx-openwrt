@@ -15,9 +15,18 @@ on:
 jobs:
   image:
     runs-on: ubuntu-26.04-arm
-    timeout-minutes: 60
+    timeout-minutes: 90
     steps:
       - uses: actions/checkout@v4
+
+      - name: Install tools
+        run: |
+          set -eux
+          for i in 1 2 3; do
+            sudo timeout 300 apt-get update && break || sleep 15
+          done
+          sudo timeout 900 apt-get install -y --no-install-recommends \
+            busybox-static u-boot-tools cpio gzip qemu-system-arm unzip curl
 
       - name: Download the existing kernel artifact
         env:
@@ -39,6 +48,50 @@ jobs:
           ls -lh k/boot/Image
           ls -lh k/boot/dtb/amlogic/meson-gxl-s905d-phicomm-n1.dtb
 
+      - name: Sanity check the Image in QEMU
+        run: |
+          set -x
+          timeout 40 qemu-system-aarch64 -M virt -cpu cortex-a53 -m 2048 -smp 2 \
+            -kernel k/boot/Image -nographic \
+            -append "console=ttyAMA0 earlycon panic=-1" 2>&1 | head -60 || true
+          echo "=== qemu exit: $? ==="
+
+      - name: Build a small initramfs
+        run: |
+          set -eux
+          rm -rf irfs && mkdir -p irfs/{bin,dev,proc,sys,newroot}
+          cp /bin/busybox irfs/bin/busybox
+          chmod 755 irfs/bin/busybox
+          for a in sh mount umount sleep findfs switch_root echo cat mkdir mdev; do
+            ln -sf busybox "irfs/bin/$a"
+          done
+          cat > irfs/init <<'EOF'
+          #!/bin/busybox sh
+          /bin/busybox --install -s /bin
+          mount -t devtmpfs devtmpfs /dev
+          mount -t proc proc /proc
+          mount -t sysfs sysfs /sys
+          /bin/mdev -s
+          sleep 2
+          ROOTARG=$(cat /proc/cmdline | tr ' ' '\n' | grep '^root=' | cut -d= -f2-)
+          echo "initramfs: root=$ROOTARG"
+          ROOTDEV=$(findfs "$ROOTARG")
+          echo "initramfs: device=$ROOTDEV"
+          [ -n "$ROOTDEV" ] || exec sh
+          mount -t btrfs -o rw "$ROOTDEV" /newroot || exec sh
+          mount --move /dev /newroot/dev
+          mount --move /proc /newroot/proc
+          mount --move /sys /newroot/sys
+          exec switch_root /newroot /sbin/init
+          EOF
+          chmod 755 irfs/init
+          ( cd irfs && find . | cpio -o -H newc --quiet | gzip -9 ) > initrd.img
+          ls -lh initrd.img
+          mkimage -A arm64 -O linux -T ramdisk -C gzip -n uInitrd -d initrd.img uInitrd-7.3 || \
+            mkimage -A arm -O linux -T ramdisk -C gzip -n uInitrd -d initrd.img uInitrd-7.3
+          ls -lh uInitrd-7.3
+          hexdump -C uInitrd-7.3 | head -2
+
       - name: Download the working image
         run: |
           set -eux
@@ -49,63 +102,20 @@ jobs:
           gzip -dk base.img.gz
           ls -lh base.img
 
-      - name: Build a boot.scr that works without initrd
-        run: |
-          set -eux
-          sudo timeout 600 apt-get install -y --no-install-recommends u-boot-tools \
-            || (sudo timeout 300 apt-get update && sudo timeout 600 apt-get install -y u-boot-tools)
-          cat > boot-noinitrd.cmd <<'EOF'
-          echo "Start AMLOGIC mainline U-boot (no initrd)"
-          if printenv bootfromsd; then exit; fi;
-          setenv loadaddr "0x44000000"
-          setenv l_mmc "0 1 2 3"
-          for devtype in "usb mmc" ; do
-            if test "${devtype}" = "mmc"; then
-              setenv l_mmc "1"
-            fi
-            for devnum in ${l_mmc} ; do
-              if test -e ${devtype} ${devnum} uEnv.txt; then
-                load ${devtype} ${devnum} ${loadaddr} uEnv.txt
-                env import -t ${loadaddr} ${filesize}
-                setenv bootargs ${APPEND}
-                if printenv mac; then
-                  setenv bootargs ${bootargs} mac=${mac}
-                elif printenv eth_mac; then
-                  setenv bootargs ${bootargs} mac=${eth_mac}
-                elif printenv ethaddr; then
-                  setenv bootargs ${bootargs} mac=${ethaddr}
-                fi
-                if load ${devtype} ${devnum} ${kernel_addr_r} ${LINUX}; then
-                  if load ${devtype} ${devnum} ${fdt_addr_r} ${FDT}; then
-                    fdt addr ${fdt_addr_r}
-                    booti ${kernel_addr_r} - ${fdt_addr_r}
-                  fi
-                fi
-              fi
-            fi
-          done
-          EOF
-          mkimage -C none -A arm -T script -d boot-noinitrd.cmd boot-noinitrd.scr
-          ls -l boot-noinitrd.scr
-
-      - name: Swap kernel and dtb in the boot partition
+      - name: Swap kernel, dtb and initramfs (boot.scr untouched)
         run: |
           set -eux
           LOOP=$(sudo losetup --find --show -P base.img)
           echo "loop=$LOOP"
           sudo mkdir -p /mnt/boot
           sudo mount "${LOOP}p1" /mnt/boot
-          ls /mnt/boot | head -20
+          ls -l /mnt/boot/boot.scr
           sudo cp k/boot/Image /mnt/boot/zImage
           sudo cp k/boot/dtb/amlogic/meson-gxl-s905d-phicomm-n1.dtb \
                   /mnt/boot/dtb/amlogic/meson-gxl-s905d-phicomm-n1.dtb
-          # storage/btrfs are built into this kernel, no initramfs needed
-          sudo sed -i 's|^INITRD=.*|INITRD=|' /mnt/boot/uEnv.txt
-          grep -E 'LINUX|INITRD|FDT|APPEND' /mnt/boot/uEnv.txt || true
-          # ophub's stock boot.scr only calls booti when INITRD could be loaded,
-          # so ship a variant that boots kernel+fdt without an initrd
-          sudo cp boot-noinitrd.scr /mnt/boot/boot.scr
-          sudo cp boot-noinitrd.scr /mnt/boot/boot-emmc.scr
+          sudo cp uInitrd-7.3 /mnt/boot/uInitrd
+          sudo sed -i 's|^INITRD=.*|INITRD=/uInitrd|' /mnt/boot/uEnv.txt
+          grep -E 'LINUX|INITRD|FDT' /mnt/boot/uEnv.txt
           sync
           sudo umount /mnt/boot
           sudo losetup -d "$LOOP"
