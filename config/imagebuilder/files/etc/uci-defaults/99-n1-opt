@@ -1,0 +1,9 @@
+#!/bin/sh
+#
+# /opt is the shared eMMC partition (p4, EMMC_SHARED, mounted by ophub at
+# /mnt/mmcblk2p4). There is nothing to partition or format here: just enable
+# the init script that bind-mounts it onto /opt after boot.
+
+[ -x /etc/init.d/optbind ] && /etc/init.d/optbind enable
+
+exit 0

@@ -24,15 +24,17 @@ uci -q delete network.lan.ip6addr
 # single NIC: drop any wan interface left over from the generic target
 uci -q delete network.wan
 uci -q delete network.wan6
-# --- IPv6: DHCPv6 client on the LAN bridge (fixed IPv4, dynamic IPv6) ---
+
+# --- IPv6: DHCPv6 client on the LAN bridge -----------------------------------
+# This box is a side-router: it does NOT serve DHCPv6/RA (clients keep getting
+# IPv6 from the main router on the same L2). It only needs a global address of
+# its own, otherwise LuCI shows a v4-only router.
 uci -q set network.lan6='interface'
 uci -q set network.lan6.proto='dhcpv6'
 uci -q set network.lan6.device='@lan'
 uci -q set network.lan6.reqaddress='try'
 uci -q set network.lan6.reqprefix='no'
 uci -q commit network
-
-
 
 # --- dhcp: DNS only, no address distribution ---
 uci -q set dhcp.lan.ignore='1'
@@ -67,13 +69,10 @@ if [ -f /etc/shadow ] && grep -q '^root::' /etc/shadow; then
 	grep -q '^root:\$1\$' /etc/shadow || logger -t n1-defaults "root password seeding failed"
 fi
 
-# --- installer: create the shared partition (p4) as EXT4 ----------------------
-# luci-app-amlogic formats p4 with this type when installing to eMMC
-# (0. script arg ${SHARED_FSTYPE}); setting it here means no post-install
-# reformat is needed.
-if [ -f /etc/config/amlogic ]; then
-	uci -q set amlogic.config.amlogic_shared_fstype='ext4'
-	uci -q commit amlogic
+# --- docker data on the shared partition (binds onto /opt at boot) ---
+if [ -f /etc/config/dockerd ]; then
+	uci -q set dockerd.globals.data_root='/opt/docker/'
+	uci -q commit dockerd
 fi
 # --- luci: Chinese UI + argon theme (only when the theme is present) ---
 if [ -f /etc/config/luci ]; then
