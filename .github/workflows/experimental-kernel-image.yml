@@ -51,9 +51,10 @@ jobs:
       - name: Sanity check the Image in QEMU
         run: |
           set -x
-          timeout 60 qemu-system-aarch64 -M virt -cpu cortex-a53 -m 2048 -smp 2 \
-            -nodefaults -nic none -kernel k/boot/Image -nographic \
-            -append "console=ttyAMA0 earlycon panic=-1" 2>&1 | head -80 || true
+          timeout 90 qemu-system-aarch64 -M virt -cpu cortex-a53 -m 2048 -smp 2 \
+            -kernel k/boot/Image \
+            -append "console=ttyAMA0 earlycon=pl011,0x09000000 keep_bootcon panic=-1" \
+            -serial stdio -display none -net none -no-reboot 2>&1 | head -120 || true
           echo "=== qemu exit: $? ==="
 
       - name: Build a small initramfs
