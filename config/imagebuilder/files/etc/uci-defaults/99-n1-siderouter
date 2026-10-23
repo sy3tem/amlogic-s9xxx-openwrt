@@ -69,6 +69,14 @@ if [ -f /etc/shadow ] && grep -q '^root::' /etc/shadow; then
 	grep -q '^root:\$1\$' /etc/shadow || logger -t n1-defaults "root password seeding failed"
 fi
 
+# --- storage: do not let block-mount auto-mount every btrfs partition --------
+# with anon_mount=1 the spare rootfs (p3) and the shared data partition (p4)
+# show up as /mnt/mmcblk2p3 and /mnt/mmcblk2p4. /opt is the only mount we want
+# (optbind init script mounts p4 there and symlinks /mnt/mmcblk2p4 -> /opt).
+if [ -f /etc/config/fstab ]; then
+	uci -q set fstab.@global[0].anon_mount='0'
+	uci -q commit fstab
+fi
 # --- docker data on the shared partition (binds onto /opt at boot) ---
 if [ -f /etc/config/dockerd ]; then
 	uci -q set dockerd.globals.data_root='/opt/docker/'
