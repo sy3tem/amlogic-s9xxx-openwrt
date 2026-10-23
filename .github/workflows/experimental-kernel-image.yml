@@ -26,7 +26,7 @@ jobs:
             sudo timeout 300 apt-get update && break || sleep 15
           done
           sudo timeout 900 apt-get install -y --no-install-recommends \
-            busybox-static u-boot-tools cpio gzip qemu-system-arm unzip curl
+            busybox-static u-boot-tools cpio gzip qemu-system-arm qemu-efi-aarch64 unzip curl
 
       - name: Download the existing kernel artifact
         env:
@@ -51,9 +51,9 @@ jobs:
       - name: Sanity check the Image in QEMU
         run: |
           set -x
-          timeout 40 qemu-system-aarch64 -M virt -cpu cortex-a53 -m 2048 -smp 2 \
-            -kernel k/boot/Image -nographic \
-            -append "console=ttyAMA0 earlycon panic=-1" 2>&1 | head -60 || true
+          timeout 60 qemu-system-aarch64 -M virt -cpu cortex-a53 -m 2048 -smp 2 \
+            -nodefaults -nic none -kernel k/boot/Image -nographic \
+            -append "console=ttyAMA0 earlycon panic=-1" 2>&1 | head -80 || true
           echo "=== qemu exit: $? ==="
 
       - name: Build a small initramfs
