@@ -62,7 +62,7 @@ grow_filesystem() {
 # only mount point this system needs.
 clean_mnt() {
 	local m
-	for m in /mnt/mmcblk2p2 /mnt/mmcblk2p3 /mnt/mmcblk2p4 /mnt/sda2 /mnt/sda3 /mnt/sda4; do
+	for m in /mnt/mmcblk2p2 /mnt/mmcblk2p3 /mnt/mmcblk2p4; do
 		mountpoint -q "$m" && umount "$m" 2>/dev/null
 	done
 }
