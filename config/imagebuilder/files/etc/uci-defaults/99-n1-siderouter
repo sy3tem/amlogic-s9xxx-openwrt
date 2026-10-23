@@ -24,6 +24,12 @@ uci -q delete network.lan.ip6addr
 # single NIC: drop any wan interface left over from the generic target
 uci -q delete network.wan
 uci -q delete network.wan6
+# --- IPv6: DHCPv6 client on the LAN bridge (fixed IPv4, dynamic IPv6) ---
+uci -q set network.lan6='interface'
+uci -q set network.lan6.proto='dhcpv6'
+uci -q set network.lan6.device='@lan'
+uci -q set network.lan6.reqaddress='try'
+uci -q set network.lan6.reqprefix='no'
 uci -q commit network
 
 
@@ -75,12 +81,12 @@ if [ -f /etc/config/fstab ]; then
 	uci -q set fstab.@mount[-1].enabled='1'
 	uci -q commit fstab
 fi
-# --- installer: shared partition (p4) stays BTRFS (known-good baseline) -----
+# --- installer: create the shared partition (p4) as EXT4 ----------------------
 # luci-app-amlogic formats p4 with this type when installing to eMMC
 # (0. script arg ${SHARED_FSTYPE}); setting it here means no post-install
 # reformat is needed.
 if [ -f /etc/config/amlogic ]; then
-	uci -q set amlogic.config.amlogic_shared_fstype='btrfs'
+	uci -q set amlogic.config.amlogic_shared_fstype='ext4'
 	uci -q commit amlogic
 fi
 # --- docker data on the shared partition (binds onto /opt at boot) ---
