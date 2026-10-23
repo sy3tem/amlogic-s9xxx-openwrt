@@ -476,13 +476,17 @@ jobs:
           gh_token: ${{ secrets.GITHUB_TOKEN }}
           body: |
             ### OpenWrt Image Information
-            - Default IP: `192.168.1.1`
+            - Default IP: `192.168.100.254/24`
+            - Gateway / DNS: `192.168.100.1`
             - Default username: `root`
             - Default password: `password`
-            - Default WIFI name: `OpenWrt`
-            - Default WIFI password: `none`
-            ### Install to EMMC
-            - Login to OpenWrt 鈫?`System` 鈫?`Amlogic Service` 鈫?`Install OpenWrt`
-            ### Applicable Platform
-            - 馃惂 `arm64`
-            - 馃悑 Docker image: https://hub.docker.com/u/ophub
+            - Side-router mode: DHCP server disabled, LAN masquerade enabled
+            - Docker data root: `/opt/docker`
+
+            ### Storage layout
+            - `p1` boot (vfat), `p2` rootfs (btrfs)
+            - shared data partition is mounted at `/opt` only
+
+            ### Notes
+            - Flash the image to eMMC directly (dd from a USB boot) or install it with the Amlogic tool
+            - Log in over SSH and change the root password after the first boot

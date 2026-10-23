@@ -1,0 +1,19 @@
+#!/bin/sh
+# luci-app-amlogic hardcodes /mnt/<disk>p4 for its upload directory and for the
+# update/install scripts. This build mounts the shared partition at /opt only,
+# so point the plugin there instead of creating extra mounts or symlinks.
+
+if [ -f /usr/share/rpcd/ucode/luci.amlogic ]; then
+	sed -i "s|return '/mnt/' + emmc + 'p4/';|return '/opt/';|" \
+		/usr/share/rpcd/ucode/luci.amlogic
+fi
+
+for f in /usr/sbin/openwrt-update-amlogic /usr/sbin/openwrt-install-amlogic; do
+	[ -f "$f" ] || continue
+	sed -i \
+		-e 's|/mnt/${EMMC_NAME}${PARTITION_NAME}4|/opt|g' \
+		-e 's|/mnt/${EMMC_NAME}p4|/opt|g' \
+		"$f"
+done
+
+exit 0
