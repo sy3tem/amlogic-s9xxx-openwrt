@@ -67,6 +67,20 @@ if [ -f /etc/shadow ] && grep -q '^root::' /etc/shadow; then
 	grep -q '^root:\$1\$' /etc/shadow || logger -t n1-defaults "root password seeding failed"
 fi
 
+# --- storage: only /opt is mounted, nothing under /mnt ------------------------
+# the data partition carries the EMMC_SHARED label (optbind creates it on the
+# free space of a directly flashed eMMC, or reuses the installer's p4)
+if [ -f /etc/config/fstab ]; then
+	uci -q set fstab.@global[0].anon_mount='0'
+	uci -q delete fstab.opt
+	uci -q add fstab mount >/dev/null
+	uci -q set fstab.@mount[-1].target='/opt'
+	uci -q set fstab.@mount[-1].label='EMMC_SHARED'
+	uci -q set fstab.@mount[-1].fstype='auto'
+	uci -q set fstab.@mount[-1].options='noatime'
+	uci -q set fstab.@mount[-1].enabled='1'
+	uci -q commit fstab
+fi
 # --- docker data on the shared partition (binds onto /opt at boot) ---
 if [ -f /etc/config/dockerd ]; then
 	uci -q set dockerd.globals.data_root='/opt/docker/'

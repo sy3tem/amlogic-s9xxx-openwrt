@@ -125,18 +125,8 @@ custom_packages() {
  [[ -d "packages" ]] || mkdir packages
  cd packages
 
- # Download luci-app-amlogic
- amlogic_api="https://api.github.com/repos/ophub/luci-app-amlogic/releases"
- # Get the latest release version
- amlogic_plugin_latest_version="$(curl -s ${amlogic_api} | grep -oP '(?<="tag_name": ")[^"]+' | grep "\-js$" | sort -Vur | head -n1)"
- # Get the download URLs for the latest release assets (ipk or apk files)
- amlogic_plugin_list=($(curl -s ${amlogic_api} | grep "browser_download_url" | grep -oE "https.*/${amlogic_plugin_latest_version}/.*\.(ipk|apk)"))
-
- # Download the latest release assets
- for plugin_url in "${amlogic_plugin_list[@]}"; do
- curl -fsSOJL "${plugin_url}"
- [[ "${?}" -eq "0" ]] && echo -e "${INFO} The [ ${plugin_url} ] is downloaded successfully."
- done
+ # luci-app-amlogic is intentionally NOT installed: the image is written to
+ # eMMC directly, so the "install to eMMC" helper is not needed.
 
  # Download other luci-app-xxx
  # ......
@@ -259,7 +249,6 @@ rebuild_firmware() {
  luci-mod-status luci-mod-system luci-proto-ipip luci-proto-ipv6 \
  luci-proto-ppp luci-proto-relay \
  \
- luci-app-amlogic luci-i18n-amlogic-zh-cn \
  \
  ${config_list} \
  "

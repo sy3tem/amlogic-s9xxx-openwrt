@@ -1,29 +1,82 @@
 #!/bin/sh /etc/rc.common
-# Bind the big shared eMMC partition onto /opt.
+# /opt = the shared data partition, and nothing is mounted under /mnt.
 #
-# ophub's installer lays the eMMC out as:
-#   p1 EMMC_BOOT   (vfat)  -> /boot
-#   p2 EMMC_ROOTFS1(btrfs) -> /mnt/mmcblk2p2   (spare rootfs)
-#   p3 EMMC_ROOTFS2(btrfs) -> /               (running rootfs)
-#   p4 EMMC_SHARED (btrfs) -> /mnt/mmcblk2p4  (all remaining space)
+# The image is a direct-flash image: p1 (boot) + p2 (rootfs) only. On first boot
+# this script carves the remaining space into p3, formats it as ext4 with the
+# label EMMC_SHARED and mounts it at /opt.
 #
-# /opt is therefore not a partition of its own: it is the shared partition.
-# Docker keeps using /mnt/mmcblk2p4/docker, which is the same directory as
-# /opt/docker after the bind.
+# If the device was installed by ophub's installer instead, a partition with the
+# EMMC_SHARED label already exists (p4) and is used as is.
 START=98
 STOP=10
+
+LABEL=EMMC_SHARED
+
+label_dev() {
+	blkid -L "${LABEL}" 2>/dev/null
+}
+
+create_shared_partition() {
+	local disk=/dev/mmcblk2 part=3
+	local start dsz total
+
+	[ -b "${disk}" ] || return 1
+	[ -b "${disk}p2" ] || return 1
+
+	# free space starts right after p2 (2 MiB aligned)
+	start=$(cat /sys/class/block/mmcblk2p2/start 2>/dev/null)
+	dsz=$(cat /sys/class/block/mmcblk2/size 2>/dev/null)
+	[ -n "${start}" ] && [ -n "${dsz}" ] || return 1
+	start=$(( (start + 4095) / 4096 * 4096 + 4096 ))
+	[ "${start}" -lt "${dsz}" ] || return 1
+	total=$(( dsz - start - 2048 ))
+	[ "${total}" -gt 65536 ] || return 1
+
+	logger -t optbind "creating ${disk}p${part} at sector ${start} (${total} sectors)"
+	echo "start=${start}, size=${total}, type=83" | \
+		sfdisk -N "${part}" --force --no-reread "${disk}" >/dev/null 2>&1 || return 1
+	partx -u -n "${part}" "${disk}" >/dev/null 2>&1
+	sleep 1
+	sync
+
+	[ -b "${disk}p${part}" ] || return 1
+	mkfs.ext4 -F -L "${LABEL}" "${disk}p${part}" >/dev/null 2>&1 || return 1
+	return 0
+}
+
+grow_filesystem() {
+	local dev fstype
+
+	dev=$(label_dev)
+	[ -n "${dev}" ] || return 0
+	fstype=$(blkid -o value -s TYPE "${dev}" 2>/dev/null)
+	case "${fstype}" in
+		ext4) resize2fs "${dev}" >/dev/null 2>&1 ;;
+		btrfs) btrfs filesystem resize max /opt >/dev/null 2>&1 ;;
+	esac
+}
 
 start() {
 	i=0
 	while [ "$i" -lt 30 ]; do
-		mountpoint -q /mnt/mmcblk2p4 && break
+		[ -n "$(label_dev)" ] && break
 		sleep 1
 		i=$((i + 1))
 	done
-	mountpoint -q /mnt/mmcblk2p4 || return 0
-	mountpoint -q /opt && return 0
+
+	# no shared partition yet: make one on the free space of the eMMC
+	if [ -z "$(label_dev)" ]; then
+		create_shared_partition || true
+	fi
+
+	dev=$(label_dev)
+	[ -n "${dev}" ] || return 0
+
 	mkdir -p /opt
-	mount --bind /mnt/mmcblk2p4 /opt
+	if ! mountpoint -q /opt; then
+		mount -L "${LABEL}" /opt 2>/dev/null || return 0
+	fi
+	grow_filesystem
 }
 
 stop() {
